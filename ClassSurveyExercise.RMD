@@ -1,0 +1,165 @@
+---
+pdf_document: default
+author: "Your name (include all team members!)"
+title: "Class Survey Exercise"
+output:
+  html_document:
+    df_print: paged
+  word_document: default
+  pdf_document: defaults
+abstract: null
+---
+***
+
+```{r "setup", include=FALSE}
+# -------------------------------------------------------------------------
+# 이 블록(setup 청크)은 include=FALSE 옵션으로 인해 
+# 최종 결과물(HTML, PDF 등)에는 코드와 실행 결과가 모두 표시되지 않습니다.
+# -------------------------------------------------------------------------
+
+# 1. knitr 패키지 로드 (R Markdown 문서를 변환하는 데 필요한 핵심 패키지)
+require("knitr")
+
+# 2. 작업 경로 설정
+# 분석에 필요한 데이터나 스크립트가 들어있는 폴더 경로를 지정합니다.
+# "****Change this to your file path****" 부분을 실제 본인의 컴퓨터 경로로 수정해야 합니다.
+sourcedir <- "****Change this to your file path****"
+
+# 3. knitr 전역(Global) 옵션 설정 - 루트 디렉토리
+# 문서가 렌더링될 때 모든 상대 경로의 기준이 되는 '루트 폴더'를 위에서 지정한 sourcedir로 고정합니다.
+opts_knit$set(root.dir = sourcedir)
+
+# 4. knitr 전역 옵션 설정 - 경고 메시지 제어
+# 코드 실행 시 발생하는 경고(warning) 문구들이 최종 문서에 출력되지 않도록 숨깁니다.
+opts_chunk$set(warning=FALSE)
+```
+
+Source files & load and clean data
+```{r}
+# 수정 전: sourcedir <-"****Change this to your file path****"
+
+# 수정 후 (예시): 자신의 실제 계정 이름을 넣어주세요.
+sourcedir <- "~/Desktop/다변량_실습파일" 
+
+# 만약 한글 폴더명이 인식이 안 된다면 전체 경로를 써보세요.
+# sourcedir <- "/Users/본인계정이름/Desktop/다변량_실습파일"
+
+opts_knit$set(root.dir = sourcedir)
+# 데이터 불러오기
+class.data <- read.csv("Class_Survey_Data.csv")
+
+# 열 이름이 너무 길어 코딩하기 불편하므로 간단하게 변경합니다.
+colnames(class.data) <- c("Row", "Height", "Sex", "Seoul", "Run100m", 
+                          "Siblings", "Transport", "Genre", "Languages", "Distance")
+
+# 데이터 확인
+summary(class.data)
+
+```
+
+1. Formulate a hypothesis about this data.
+
+We hypothesized that ...
+
+We hypothesized that male students are taller than female students in this dataset
+
+2. Now visualize your data to see if this hypothesis appears to be true.
+```{r}
+# ggplot2 패키지 로드 (설치 안 되어 있을 시 install.packages("ggplot2") 실행)
+library(ggplot2)
+
+# 성별에 따른 키의 분포 시각화
+ggplot(class.data, aes(x = Sex, y = Height, fill = Sex)) +
+  geom_boxplot(alpha = 0.7) +          # 박스 플롯 생성 (투명도 0.7)
+  geom_jitter(width = 0.2, alpha = 0.5) + # 실제 데이터 포인트를 흩뿌려 분포 확인
+  labs(title = "Height Distribution by Sex",
+       x = "Sex (Gender)",
+       y = "Height (cm)") +
+  theme_minimal()                      # 깔끔한 테마 적용
+
+```
+
+
+3. What if you used convenience sampling and only surveyed the rows 2,3, and 4? Would your inferences change?
+```{r}
+# 1. 편의 추출 (2, 3, 4행만 선택하여 새로운 데이터셋 생성)
+convenience_sample <- class.data[2:4, ]
+
+# 2. 선택된 데이터의 내용 확인
+# 어떤 성별이 포함되었는지, 키는 얼마인지 콘솔에서 바로 확인합니다.
+print(convenience_sample)
+
+# 3. 샘플링된 데이터 요약
+summary(convenience_sample)
+
+# 4. 시각화 (데이터가 3개뿐이므로 박스플롯 대신 점 그래프로 확인)
+library(ggplot2)
+ggplot(convenience_sample, aes(x = Sex, y = Height, color = Sex)) +
+  geom_point(size = 5) +
+  ylim(150, 190) +  # 전체 데이터와 비교하기 위해 y축 범위를 고정
+  labs(title = "Height Distribution (Rows 2, 3, 4 Only)",
+       subtitle = "Convenience Sampling Results",
+       x = "Sex",
+       y = "Height (cm)") +
+  theme_minimal()
+```
+
+
+4. Randomly sample 10 students. Do you come to the same conclusions as with the full dataset?
+```{r}
+# 1. 무작위 샘플링 (10명 추출)
+# set.seed를 사용하면 나중에 다시 실행해도 동일한 랜덤 결과가 나옵니다.
+set.seed(123) 
+random_sample_10 <- class.data[sample(1:nrow(class.data), 10), ]
+
+# 2. 샘플링된 데이터 확인
+print(random_sample_10)
+
+# 3. 시각화 (전체 데이터와 비교를 위해 박스플롯 사용)
+library(ggplot2)
+ggplot(random_sample_10, aes(x = Sex, y = Height, fill = Sex)) +
+  geom_boxplot(alpha = 0.6) +
+  geom_jitter(width = 0.2, size = 3) +
+  ylim(150, 190) +
+  labs(title = "Random Sample of 10 Students",
+       subtitle = "Does this represent the whole class?",
+       x = "Sex",
+       y = "Height (cm)") +
+  theme_minimal()
+```
+
+
+5. Randomly sample 5 male students and 5 female students. Do you come to the same conclusions as with the full dataset?
+```{r}
+# 재현성을 위한 시드 설정
+set.seed(456)
+
+# 1. 남학생(Male) 중 5명 무작위 추출
+males_data <- class.data[class.data$Sex == "Male", ]
+sample_males <- males_data[sample(1:nrow(males_data), 5), ]
+
+# 2. 여학생(Female) 중 5명 무작위 추출
+females_data <- class.data[class.data$Sex == "Female", ]
+sample_females <- females_data[sample(1:nrow(females_data), 5), ]
+
+# 3. 두 데이터를 하나로 합치기
+stratified_sample <- rbind(sample_males, sample_females)
+
+# 4. 시각화
+library(ggplot2)
+ggplot(stratified_sample, aes(x = Sex, y = Height, fill = Sex)) +
+  geom_boxplot(alpha = 0.6) +
+  geom_jitter(width = 0.2, size = 3) +
+  ylim(150, 190) +
+  labs(title = "Stratified Sample (5 Males, 5 Females)",
+       subtitle = "Comparing balanced gender groups",
+       x = "Sex",
+       y = "Height (cm)") +
+  theme_minimal()
+```
+
+
+6. Do you see differences between sexes that wouldn't have been captured without stratified sampling?
+```{r}
+층화 추출은 성별 비중을 균등하게 확보함으로써 단순 무작위 추출에서 발생할 수 있는 소수 집단의 대표성 부족 문제를 해결하고, 두 집단 간의 확연한 변동성 차이와 비중첩성을 명확히 포착해냅니다. 결과적으로 이는 소규모 표본만으로도 전체 데이터의 통계적 특성을 가장 공정하고 정밀하게 재현할 수 있게 합니다
+```

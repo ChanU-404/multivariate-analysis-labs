@@ -1,0 +1,163 @@
+---
+title: "Project 1: Railroad Accident Analysis (Casualties)"
+author: "김찬우 (Team 6)"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: united
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+# 기존에 적으신 주소 바로 밑에 추가
+knitr::opts_knit$set(root.dir = "/Users/chanu/Desktop/다변량_실습파일")
+# 1. 패키지 로드
+library(ggplot2)
+library(dplyr)
+library(MASS)
+library(car)
+library(lmtest)
+library(ggfortify)
+
+# 2. 경로 설정 (반드시 본인 컴퓨터의 실제 경로인지 확인하세요!)
+# 맥(Mac) 사용자이시므로 아래와 같은 절대 경로 형식이 맞습니다.
+traindir  <- "/Users/chanu/Desktop/다변량_실습파일/Train Data"
+sourcedir <- "/Users/chanu/Desktop/다변량_실습파일"
+
+# 3. 소스 파일 불러오기
+# setwd() 보다는 소스 파일의 전체 경로를 지정하는 것이 RMD에서 더 안전합니다.
+source(file.path(sourcedir, "AccidentInput.R"))
+
+# 4. 데이터 로드 (에러가 났던 부분)
+# 여기서 "csv_folder_path"라고 쓰지 않고, 위에서 만든 traindir 변수를 넣어야 합니다.
+acts <- file.inputl(traindir)
+```
+
+1. Generating Hypotheses
+본 연구는 최근 발생한 대형 열차 사고 사례들을 통해 사고의 물리적 유형(Accident Type)과 주행 속도(TRNSPD)가 인명 피해 규모에 미치는 치명적인 결합 효과에 주목하였습니다. 특히 '고속 상태에서의 탈선'이 인명 피해를 극대화하는 핵심 시나리오임을 검증하고자 합니다.
+```{r}
+# 데이터 로드 및 극단치 추출
+acts    <- file.inputl(traindir)
+totacts <- combine.data(acts)
+
+# 극단치 대형 사고 필터링 (ACCDMG 기준)
+dmgbox <- boxplot(totacts$ACCDMG, plot = FALSE)
+xdmg <- totacts[totacts$ACCDMG > dmgbox$stats[5, 1], ]
+xdmg <- xdmg[-102, ] # 9/11 데이터 제거
+
+# 중복 제거
+xdmgnd <- xdmg[!(duplicated(xdmg[, c("INCDTNO", "YEAR", "MONTH", "DAY", "TIMEHR", "TIMEMIN")])), ]
+
+# Casualties 분석용 데이터셋 생성
+cas_data <- xdmgnd %>%
+  mutate(
+    CASUALTIES = TOTINJ + TOTKLD,
+    Acc_Type = factor(ifelse(TYPE == 1, "Derailment", "Others"))
+  ) %>%
+  filter(CASUALTIES > 0, !is.na(TRNSPD), !is.na(Acc_Type), !is.na(PASSTRN)) %>%
+  mutate(PASSTRN = factor(PASSTRN))
+
+# 사고 유형별 평균 사상자 수 요약
+cas_summary <- cas_data %>% 
+  group_by(Acc_Type) %>%
+  summarize(avg_cas = mean(CASUALTIES, na.rm=TRUE))
+
+print(cas_summary)
+```
+1.2 시각화 (Bar Plot & Interaction Plot)
+```{r}
+# Bar Plot: 사고 유형별 평균 사상자
+ggplot(cas_summary, aes(x = Acc_Type, y = avg_cas, fill = Acc_Type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Average Casualties by Accident Type", x = "Accident Type", y = "Avg Casualties") +
+  theme_minimal()
+
+# Interaction Plot (Raw Scale)
+cas_data <- cas_data %>%
+  mutate(Speed_Group = cut(TRNSPD, 
+                           breaks = c(min(TRNSPD, na.rm = TRUE), 
+                                      median(TRNSPD, na.rm = TRUE), 
+                                      max(TRNSPD, na.rm = TRUE)), 
+                           include.lowest = TRUE, labels = c("low speed", "high speed")))
+
+ggplot(cas_data, aes(x = Speed_Group, y = CASUALTIES, color = Acc_Type, group = Acc_Type)) +
+  stat_summary(fun = mean, geom = "point", size = 2) +
+  stat_summary(fun = mean, geom = "line", linewidth = 1) + 
+  labs(title = "Interaction of Speed and Accident Type (Raw)",
+       x = "Speed", y = "Average Casualties", color = "Accident Type") +
+  theme_minimal()
+```
+분석: 탈선 사고가 기타 사고에 비해 사상자 수가 높으며, 특히 고속 구간에서 사상자 발생률의 기울기가 가파르게 나타나는 상호작용 효과를 시각적으로 확인할 수 있습니다.
+
+1.3 Hypotheses$H_{0,2}$: 열차 속도가 사상자 수에 미치는 영향은 사고 유형(탈선 vs 비탈선)에 관계없이 동일하다. (상호작용 효과 없음)$H_{a,2}$: 열차 속도가 사상자 수에 미치는 영향은 사고 유형에 따라 유의미하게 다르며, 특히 탈선 사고 시 속도 증가에 따른 치명성이 더 급격하게 증가한다. (상호작용 효과 존재)
+
+2. Model Assessment
+
+2.1 모델 수립 및 적합도 평가 (Before Transformation)
+
+```{r}
+# 변환 전 모델 수립
+lm_raw_inter <- lm(CASUALTIES ~ TRNSPD * Acc_Type + PASSTRN, data = cas_data)
+best_lm_raw <- stepAIC(lm_raw_inter, direction = "backward", trace = FALSE)
+
+summary(best_lm_raw)
+```
+2.2 문제점 진단 (Diagnosis)
+```{r}
+# 진단 플롯 출력
+autoplot(best_lm_raw, which = c(1, 2), colour = "steelblue", label.size = 3) + 
+  theme_minimal() + labs(title = "Diagnostic Plots: Raw Model")
+```
+진단 결과 분석:
+
+Residuals vs Fitted: 잔차가 특정 구간에 밀집된 이분산성(Heteroscedasticity)이 관찰됩니다.
+
+Normal Q-Q: 사상자 데이터의 왜도로 인해 정규성 가정이 크게 훼손되었습니다. 이를 해결하기 위한 변수가 변환이 필요합니다.
+
+3. Adjusted Model (Box-Cox Transformation)
+
+3.1 모델 보정 (Adjustment)
+```{r}
+# Box-Cox 최적 lambda 도출
+bc_result <- boxcox(CASUALTIES ~ TRNSPD * Acc_Type + PASSTRN, data = cas_data, plotit = FALSE)
+lambda <- bc_result$x[which.max(bc_result$y)]
+cat("최적 Lambda 값:", round(lambda, 4))
+
+# 종속변수 변환 적용
+if (abs(lambda) < 0.05) {
+  cas_data$CAS_BC <- log(cas_data$CASUALTIES)
+} else {
+  cas_data$CAS_BC <- (cas_data$CASUALTIES^lambda - 1) / lambda
+}
+
+# 변환된 모델 재수립 및 최적화
+lm_bc_inter <- lm(CAS_BC ~ TRNSPD * Acc_Type + PASSTRN, data = cas_data)
+best_lm_bc <- stepAIC(lm_bc_inter, direction = "backward", trace = FALSE)
+
+summary(best_lm_bc)
+```
+
+3.2 모델 재진단 및 시각화 (After Transformation)
+
+```{r}
+# 진단 플롯 출력 (Box-Cox Model)
+autoplot(best_lm_bc, which = c(1, 2), colour = "darkorange", label.size = 3) + 
+  theme_minimal() + labs(title = "Diagnostic Plots: Box-Cox Model")
+
+# 최종 상호작용 플롯
+ggplot(cas_data, aes(x = Speed_Group, y = CAS_BC, color = Acc_Type, group = Acc_Type)) +
+  stat_summary(fun = mean, geom = "point", size = 2) +
+  stat_summary(fun = mean, geom = "line", linewidth = 1) + 
+  labs(title = "Final Interaction Plot (Box-Cox Scale)",
+       x = "Speed", y = "Transformed Casualties", color = "Accident Type") +
+  theme_minimal()
+```
+4. Evidence & Recommendation to FRA
+
+4.1 Statistical Evidence최종 모델의 상호작용 항(TRNSPD:Acc_TypeOthers)의 p-value가 매우 유의하게 나타나 귀무가설($H_{0,2}$)을 강력하게 기각합니다.변환 후 Adjusted $R^2$가 약 22.47%로 상승하여 모델의 설명력이 크게 개선되었습니다.
+
+4.2 Recommendations
+고속 노선 인프라 정밀 관리: 속도가 높은 구간일수록 선로 마모 및 탈선 요인을 선제적으로 점검해야 합니다.
+
+시스템적 속도 제어 프로토콜: 탈선 위험 지점에 PTC(열차 긍정 제어 시스템)를 통한 자동 감속 시스템 도입을 권고합니다.
